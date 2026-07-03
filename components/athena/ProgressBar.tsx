@@ -1,32 +1,61 @@
+"use client";
+
+import { memo, useEffect } from "react";
+import { motion, useSpring, useTransform } from "framer-motion";
+
 type ProgressBarProps = {
-  current: number;
-  total: number;
+  confidence: number;
 };
 
-export function ProgressBar({ current, total }: ProgressBarProps) {
-  const percentage = Math.round((current / total) * 100);
+function ProgressBarComponent({ confidence }: ProgressBarProps) {
+  const spring = useSpring(confidence, {
+    stiffness: 90,
+    damping: 22,
+    mass: 0.6,
+  });
+  const width = useTransform(spring, (value) => `${value}%`);
+
+  useEffect(() => {
+    spring.set(confidence);
+  }, [confidence, spring]);
 
   return (
-    <div className="mb-10">
-      <div className="mb-3 flex items-center justify-between text-sm">
-        <span className="font-medium text-white/50">
-          Question {current} of {total}
-        </span>
-        <span className="font-mono text-xs text-white/30">{percentage}%</span>
+    <div className="mb-10" aria-labelledby="understanding-label">
+      <div className="mb-2">
+        <div className="flex items-baseline justify-between gap-4">
+          <p
+            id="understanding-label"
+            className="text-sm font-medium text-white/70"
+          >
+            Athena Understanding
+          </p>
+          <p
+            className="font-mono text-2xl font-semibold tracking-tight text-white tabular-nums"
+            aria-label={`${confidence} percent understanding`}
+          >
+            {confidence}%
+          </p>
+        </div>
+        <p className="mt-1.5 text-sm leading-relaxed text-white/40">
+          Confidence is increasing as Athena learns more about your startup.
+        </p>
       </div>
+
       <div
         role="progressbar"
-        aria-valuenow={current}
-        aria-valuemin={1}
-        aria-valuemax={total}
-        aria-label={`Discovery progress: question ${current} of ${total}`}
-        className="h-1 w-full overflow-hidden rounded-full bg-white/10"
+        aria-valuenow={confidence}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-labelledby="understanding-label"
+        className="h-1.5 w-full overflow-hidden rounded-full bg-white/10"
       >
-        <div
-          className="h-full rounded-full bg-[#22c55e] transition-all duration-500 ease-out"
-          style={{ width: `${percentage}%` }}
+        <motion.div
+          className="h-full rounded-full bg-[#22c55e]"
+          style={{ width }}
         />
       </div>
     </div>
   );
 }
+
+export const ProgressBar = memo(ProgressBarComponent);

@@ -1,30 +1,40 @@
-import { analyzeWorkingMemory } from "@/lib/athena/analyzer";
-import { composeStartupIdea } from "@/lib/athena/brief";
+import { buildDiscoveryContext } from "@/lib/athena/memory";
 import type { WorkingMemory } from "@/lib/athena/types";
+import {
+  logOpenAIError,
+  logOpenAIReceived,
+  logOpenAIStarted,
+  logParseFailure,
+  logParsedResponse,
+  logPipelineError,
+} from "@/lib/employees/athena/pipelineLogger";
+import type { CandidateQuestion } from "@/lib/forge-cortex/types";
+import { MissingOpenAIApiKeyError } from "@/lib/openai";
 
 import { isLiveProvider } from "./config";
 import {
-  parseFollowUpResponse,
+  parseGeneratedQuestionResponse,
   parseProductBriefResponse,
   parseSummaryResponse,
 } from "./parser";
 import {
-  buildFollowUpMessages,
   buildProductBriefMessages,
+  buildQuestionMessages,
   buildSummarizeMessages,
 } from "./prompts/athena";
 import { claudeProvider } from "./providers/claude";
 import { geminiProvider } from "./providers/gemini";
 import { openAIProvider } from "./providers/openai";
 import type {
-  AIFollowUp,
+  AIGeneratedQuestion,
   AIProductBrief,
   AIProvider,
   AIProviderId,
+  AIResponse,
   AISummary,
   GatewayResult,
 } from "./types";
-import { AIProviderNotFoundError } from "./types";
+import { AIGatewayError, AIProviderNotFoundError } from "./types";
 
 const PROVIDER_REGISTRY: Record<AIProviderId, AIProvider> = {
   openai: openAIProvider,
@@ -43,10 +53,9 @@ export interface GenerateProductBriefRequest {
   memory: WorkingMemory;
 }
 
-export interface GenerateFollowUpRequest {
+export interface GenerateQuestionRequest {
   memory: WorkingMemory;
-  questionText: string;
-  currentAnswer: string;
+  candidate: CandidateQuestion;
 }
 
 export interface SummarizeRequest {
@@ -73,53 +82,57 @@ function resolveResponseMode(provider: AIProvider): AIProductBrief["metadata"]["
   return isLiveProvider(provider.id) ? "live" : "mock";
 }
 
-function buildMockProductBriefFromAnalysis(
+function wrapProviderError(task: string, error: unknown): never {
+  logOpenAIError(task, error);
+
+  if (error instanceof MissingOpenAIApiKeyError) {
+    throw error;
+  }
+
+  if (error instanceof AIGatewayError) {
+    throw error;
+  }
+
+  if (error instanceof Error) {
+    throw new AIGatewayError(
+      `OpenAI ${task} failed: ${error.message}`,
+    );
+  }
+
+  throw new AIGatewayError(`OpenAI ${task} failed with an unknown error.`);
+}
+
+function parseQuestionWithLogging(
+  content: string,
+  candidate: CandidateQuestion,
+  provider: AIProvider,
+  mode: AIProductBrief["metadata"]["mode"],
   sessionId: string,
-  provider: AIProvider,
-  analysis: ReturnType<typeof analyzeWorkingMemory>,
-): AIProductBrief {
-  return {
-    startupIdea: composeStartupIdea(analysis),
-    problem: analysis.problem,
-    customer: analysis.customer,
-    currentSolution: analysis.currentSolution,
-    frustrations: analysis.frustration,
-    proposedSolution: analysis.proposedSolution,
-    mvp: analysis.mvp,
-    successGoal: analysis.successGoal,
-    metadata: {
+): AIGeneratedQuestion {
+  try {
+    const parsed = parseGeneratedQuestionResponse(
+      content,
+      candidate,
+      provider,
+      mode,
+    );
+
+    if (!parsed.question.trim()) {
+      logParseFailure("generate-question", content);
+      throw new AIGatewayError("Parsed question was empty.");
+    }
+
+    return parsed;
+  } catch (error) {
+    logParseFailure("generate-question", content);
+    logPipelineError("gateway.parse-question", error, {
       sessionId,
-      generatedAt: new Date(),
+      candidateId: candidate.id,
+      mode,
       provider: provider.id,
-      model: provider.model,
-      source: "ai-gateway",
-      mode: "mock",
-    },
-  };
-}
-
-function buildMockFollowUp(
-  provider: AIProvider,
-  questionText: string,
-): AIFollowUp {
-  return {
-    message: `[${provider.id} Mock] To sharpen our product direction: can you add more specificity to your answer for "${questionText}"?`,
-    intent: "clarify",
-  };
-}
-
-function buildMockSummary(provider: AIProvider, content: string): AISummary {
-  const trimmed = content.trim();
-  const preview = trimmed.slice(0, 180);
-
-  return {
-    summary: `[${provider.id} Mock] ${preview}${trimmed.length > 180 ? "..." : ""}`,
-    keyPoints: [
-      "The core problem is clearly articulated.",
-      "The target customer needs sharper definition.",
-      "The MVP scope should stay ruthlessly small.",
-    ],
-  };
+    });
+    throw error;
+  }
 }
 
 export class AIGateway {
@@ -133,36 +146,59 @@ export class AIGateway {
     return this.provider;
   }
 
-  async generateProductBrief(
-    request: GenerateProductBriefRequest,
-  ): Promise<GatewayResult<AIProductBrief>> {
-    const analysis = analyzeWorkingMemory(request.memory);
-    const messages = buildProductBriefMessages(
-      analysis,
-      request.memory.sessionId,
-    );
+  async generateQuestion(
+    request: GenerateQuestionRequest,
+  ): Promise<GatewayResult<AIGeneratedQuestion>> {
+    const context = buildDiscoveryContext(request.memory);
+    const messages = buildQuestionMessages(request.candidate, context);
     const mode = resolveResponseMode(this.provider);
+    const sessionId = request.memory.sessionId;
 
-    const response = await this.provider.reason({
-      messages,
-      temperature: 0.2,
-      metadata: { task: "generate-product-brief" },
+    logOpenAIStarted("generate-question", {
+      sessionId,
+      provider: this.provider.id,
+      model: this.provider.model,
+      mode,
+      candidateId: request.candidate.id,
     });
 
-    const data =
-      mode === "live"
-        ? parseProductBriefResponse(
-            response.content,
-            request.memory.sessionId,
-            this.provider,
-            analysis,
-            mode,
-          )
-        : buildMockProductBriefFromAnalysis(
-            request.memory.sessionId,
-            this.provider,
-            analysis,
-          );
+    let response: AIResponse;
+
+    try {
+      response = await this.provider.generate({
+        messages,
+        temperature: 0.3,
+        metadata: {
+          task: "generate-question",
+          dimension: request.candidate.targetDimension,
+        },
+      });
+    } catch (error) {
+      wrapProviderError("generate-question", error);
+    }
+
+    logOpenAIReceived("generate-question", {
+      sessionId,
+      provider: this.provider.id,
+      model: response.model,
+      finishReason: response.finishReason,
+      contentLength: response.content.length,
+      contentPreview: response.content.slice(0, 300),
+    });
+
+    const data = parseQuestionWithLogging(
+      response.content,
+      request.candidate,
+      this.provider,
+      mode,
+      sessionId,
+    );
+
+    logParsedResponse("generate-question", {
+      sessionId,
+      questionPreview: data.question.slice(0, 200),
+      targetDimension: data.targetDimension,
+    });
 
     return {
       data,
@@ -171,28 +207,66 @@ export class AIGateway {
     };
   }
 
-  async generateFollowUp(
-    request: GenerateFollowUpRequest,
-  ): Promise<GatewayResult<AIFollowUp>> {
-    const analysis = analyzeWorkingMemory(request.memory);
-    const messages = buildFollowUpMessages({
-      questionText: request.questionText,
-      currentAnswer: request.currentAnswer,
-      analysis,
-    });
+  async generateProductBrief(
+    request: GenerateProductBriefRequest,
+  ): Promise<GatewayResult<AIProductBrief>> {
+    const context = buildDiscoveryContext(request.memory);
+    const messages = buildProductBriefMessages(
+      context,
+      request.memory.sessionId,
+    );
     const mode = resolveResponseMode(this.provider);
+    const sessionId = request.memory.sessionId;
 
-    const response = await this.provider.chat(messages);
+    logOpenAIStarted("generate-product-brief", {
+      sessionId,
+      provider: this.provider.id,
+      model: this.provider.model,
+      mode,
+    });
 
-    const data =
-      mode === "live"
-        ? parseFollowUpResponse(
-            response.content,
-            this.provider,
-            request.questionText,
-            mode,
-          )
-        : buildMockFollowUp(this.provider, request.questionText);
+    let response: AIResponse;
+
+    try {
+      response = await this.provider.reason({
+        messages,
+        temperature: 0.2,
+        metadata: { task: "generate-product-brief" },
+      });
+    } catch (error) {
+      wrapProviderError("generate-product-brief", error);
+    }
+
+    logOpenAIReceived("generate-product-brief", {
+      sessionId,
+      provider: this.provider.id,
+      model: response.model,
+      finishReason: response.finishReason,
+      contentLength: response.content.length,
+      contentPreview: response.content.slice(0, 300),
+    });
+
+    let data: AIProductBrief;
+
+    try {
+      data = parseProductBriefResponse(
+        response.content,
+        request.memory.sessionId,
+        this.provider,
+        context,
+        mode,
+      );
+    } catch (error) {
+      logParseFailure("generate-product-brief", response.content);
+      logPipelineError("gateway.parse-brief", error, { sessionId, mode });
+      throw error;
+    }
+
+    logParsedResponse("generate-product-brief", {
+      sessionId,
+      blueprintVersion: data.metadata.version,
+      sectionCount: 16,
+    });
 
     return {
       data,
@@ -205,21 +279,44 @@ export class AIGateway {
     const messages = buildSummarizeMessages(request.content, request.context);
     const mode = resolveResponseMode(this.provider);
 
-    const response = await this.provider.generate({
-      messages,
-      temperature: 0.3,
-      metadata: { task: "summarize" },
+    logOpenAIStarted("summarize", {
+      provider: this.provider.id,
+      model: this.provider.model,
+      mode,
     });
 
-    const data =
-      mode === "live"
-        ? parseSummaryResponse(
-            response.content,
-            this.provider,
-            request.content,
-            mode,
-          )
-        : buildMockSummary(this.provider, request.content);
+    let response: AIResponse;
+
+    try {
+      response = await this.provider.generate({
+        messages,
+        temperature: 0.3,
+        metadata: { task: "summarize" },
+      });
+    } catch (error) {
+      wrapProviderError("summarize", error);
+    }
+
+    logOpenAIReceived("summarize", {
+      provider: this.provider.id,
+      model: response.model,
+      finishReason: response.finishReason,
+      contentLength: response.content.length,
+    });
+
+    let data: AISummary;
+
+    try {
+      data = parseSummaryResponse(
+        response.content,
+        this.provider,
+        request.content,
+        mode,
+      );
+    } catch (error) {
+      logParseFailure("summarize", response.content);
+      throw error;
+    }
 
     return {
       data,
@@ -261,20 +358,20 @@ export function getProvider(id: AIProviderId): AIProvider {
   return provider;
 }
 
+export async function generateQuestion(
+  request: GenerateQuestionRequest,
+  config?: AIGatewayConfig,
+): Promise<GatewayResult<AIGeneratedQuestion>> {
+  const gateway = config ? createGateway(config) : getDefaultGateway();
+  return gateway.generateQuestion(request);
+}
+
 export async function generateProductBrief(
   request: GenerateProductBriefRequest,
   config?: AIGatewayConfig,
 ): Promise<GatewayResult<AIProductBrief>> {
   const gateway = config ? createGateway(config) : getDefaultGateway();
   return gateway.generateProductBrief(request);
-}
-
-export async function generateFollowUp(
-  request: GenerateFollowUpRequest,
-  config?: AIGatewayConfig,
-): Promise<GatewayResult<AIFollowUp>> {
-  const gateway = config ? createGateway(config) : getDefaultGateway();
-  return gateway.generateFollowUp(request);
 }
 
 export async function summarize(
@@ -286,7 +383,7 @@ export async function summarize(
 }
 
 export type {
-  AIFollowUp,
+  AIGeneratedQuestion,
   AIProductBrief,
   AIProvider,
   AIProviderId,

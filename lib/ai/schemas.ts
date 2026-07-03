@@ -1,4 +1,4 @@
-import type { AIFollowUp, AIProductBrief, AISummary } from "./types";
+import type { AIFollowUp, AIProductBrief, AISummary, AIGeneratedQuestion } from "./types";
 
 const FOLLOW_UP_INTENTS = new Set<AIFollowUp["intent"]>([
   "clarify",
@@ -33,6 +33,25 @@ function readStringArray(
   return items.length > 0 ? items : null;
 }
 
+const FOUNDER_BLUEPRINT_KEYS = [
+  "executiveSummary",
+  "startupThesis",
+  "coreProblem",
+  "targetCustomer",
+  "buyer",
+  "keyAssumptions",
+  "biggestRisks",
+  "validationPlan",
+  "mvp30Day",
+  "successMetrics",
+  "recommendedNextAction",
+  "founderDNASummary",
+  "evidenceSummary",
+  "blindSpots",
+  "opportunityScore",
+  "conversationQuality",
+] as const;
+
 export function isAIProductBriefPayload(value: unknown): value is Omit<
   AIProductBrief,
   "metadata"
@@ -41,16 +60,19 @@ export function isAIProductBriefPayload(value: unknown): value is Omit<
     return false;
   }
 
-  return (
-    typeof value.startupIdea === "string" &&
-    typeof value.problem === "string" &&
-    typeof value.customer === "string" &&
-    typeof value.currentSolution === "string" &&
-    typeof value.frustrations === "string" &&
-    typeof value.proposedSolution === "string" &&
-    typeof value.mvp === "string" &&
-    typeof value.successGoal === "string"
+  return FOUNDER_BLUEPRINT_KEYS.every(
+    (key) => typeof value[key] === "string",
   );
+}
+
+export function isAIGeneratedQuestionPayload(
+  value: unknown,
+): value is Pick<AIGeneratedQuestion, "question"> {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return typeof value.question === "string" && value.question.trim().length > 0;
 }
 
 export function isAIFollowUpPayload(value: unknown): value is AIFollowUp {

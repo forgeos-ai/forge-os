@@ -1,37 +1,46 @@
 import type { AIProductBrief, AIProviderId } from "@/lib/ai/types";
-import type { DiscoveryStatus, QuestionId } from "@/lib/athena/types";
+import type { ConfidenceScores } from "@/lib/forge-cortex/types";
+import type { DiscoveryStatus } from "@/lib/athena/types";
 
-import type { EmployeeProgress, EmployeeQuestionDto } from "../types";
+export interface AthenaConfidenceDto {
+  average: number;
+  lowestDimension: string;
+  lowestScore: number;
+  scores: ConfidenceScores;
+}
+
+export interface AthenaQuestionDto {
+  id: string;
+  text: string;
+}
 
 export interface AthenaSessionResponse {
   sessionId: string;
   status: DiscoveryStatus;
-  progress: EmployeeProgress;
-  question: EmployeeQuestionDto;
-}
-
-export interface AthenaAnswerRequest {
-  sessionId: string;
-  questionId: QuestionId;
-  answer: string;
+  question: AthenaQuestionDto;
+  confidence: AthenaConfidenceDto;
+  questionNumber: number;
 }
 
 export interface AthenaAnswerResponse {
   sessionId: string;
   status: DiscoveryStatus;
-  progress: EmployeeProgress;
-  nextQuestion: EmployeeQuestionDto | null;
+  question: AthenaQuestionDto | null;
+  confidence: AthenaConfidenceDto;
+  questionNumber: number;
   readyForBrief: boolean;
-}
-
-export interface AthenaBriefRequest {
-  sessionId: string;
 }
 
 export interface AthenaBriefResponse {
   sessionId: string;
   brief: AIProductBrief;
   provider: AIProviderId;
+}
+
+export interface AthenaRationaleResponse {
+  sessionId: string;
+  questionId: string;
+  rationale: string;
 }
 
 export class AthenaServiceError extends Error {

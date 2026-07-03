@@ -4,6 +4,7 @@ import { openai } from "@/lib/openai";
 
 import { getAIConfig } from "../config";
 import type { AIProvider, AIRequest, AIResponse, AIMessage } from "../types";
+import { AIGatewayError } from "../types";
 import {
   mapOpenAICompletionToAIResponse,
   resolveMaxTokens,
@@ -23,15 +24,29 @@ class OpenAIProvider implements AIProvider {
     temperature: number,
     jsonMode = false,
   ): Promise<AIResponse> {
-    const completion = await openai.chat.completions.create({
-      model: this.model,
-      messages: toOpenAIMessages(request.messages),
-      temperature: resolveTemperature(request, temperature),
-      max_tokens: resolveMaxTokens(request),
-      ...(jsonMode ? { response_format: { type: "json_object" as const } } : {}),
-    });
+    try {
+      const completion = await openai.chat.completions.create({
+        model: this.model,
+        messages: toOpenAIMessages(request.messages),
+        temperature: resolveTemperature(request, temperature),
+        max_tokens: resolveMaxTokens(request),
+        ...(jsonMode ? { response_format: { type: "json_object" as const } } : {}),
+      });
 
-    return mapOpenAICompletionToAIResponse(this.id, this.model, completion);
+      return mapOpenAICompletionToAIResponse(this.id, this.model, completion);
+    } catch (error) {
+      console.error("[openai-provider] completion failed", {
+        model: this.model,
+        task: request.metadata?.task ?? "unknown",
+        error,
+      });
+
+      if (error instanceof Error) {
+        throw new AIGatewayError(`OpenAI API error: ${error.message}`);
+      }
+
+      throw new AIGatewayError("OpenAI API returned an unknown error.");
+    }
   }
 
   async generate(request: AIRequest): Promise<AIResponse> {

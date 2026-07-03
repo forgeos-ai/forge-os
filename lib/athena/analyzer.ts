@@ -1,10 +1,5 @@
-import { DISCOVERY_QUESTIONS } from "./questions";
-import type {
-  AnalysisResult,
-  FounderAnswer,
-  QuestionId,
-  WorkingMemory,
-} from "./types";
+import { buildDiscoveryContext } from "./memory";
+import type { AnalysisResult, FounderAnswer, QuestionId, WorkingMemory } from "./types";
 
 function normalizeAnswer(value: string): string {
   return value.trim().replace(/\s+/g, " ");
@@ -23,30 +18,26 @@ export function createFounderAnswer(
   };
 }
 
-export function getMissingQuestionIds(
-  memory: WorkingMemory,
-): QuestionId[] {
-  return DISCOVERY_QUESTIONS.filter(
-    (question) => !isAnswerComplete(memory.answers[question.id]),
-  ).map((question) => question.id);
-}
-
-export function isAnswerComplete(
-  answer: FounderAnswer | undefined,
-): answer is FounderAnswer {
-  return answer !== undefined && answer.normalizedValue.length > 0;
+export function isAnswerComplete(answer: string | undefined): boolean {
+  return typeof answer === "string" && answer.trim().length > 0;
 }
 
 export function isDiscoveryComplete(memory: WorkingMemory): boolean {
-  return getMissingQuestionIds(memory).length === 0;
+  return memory.status === "ready-for-brief" || memory.status === "complete";
 }
 
 export function analyzeWorkingMemory(memory: WorkingMemory): AnalysisResult {
-  return analyzeAnswers(
-    DISCOVERY_QUESTIONS.map((question) => memory.answers[question.id]).filter(
-      (answer): answer is FounderAnswer => isAnswerComplete(answer),
-    ),
-  );
+  const context = buildDiscoveryContext(memory);
+
+  return {
+    problem: context.problem,
+    customer: context.customer,
+    currentSolution: context.currentAlternatives,
+    frustration: context.frustrations,
+    proposedSolution: context.proposedSolution,
+    mvp: context.mvp,
+    successGoal: context.successGoal,
+  };
 }
 
 export function analyzeAnswers(answers: FounderAnswer[]): AnalysisResult {
@@ -66,4 +57,8 @@ export function analyzeAnswers(answers: FounderAnswer[]): AnalysisResult {
     mvp: read("mvp"),
     successGoal: read("success-goal"),
   };
+}
+
+export function getMissingQuestionIds(): QuestionId[] {
+  return [];
 }

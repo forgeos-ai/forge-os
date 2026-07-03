@@ -1,23 +1,35 @@
 import "server-only";
 
-import { errorResponse, jsonResponse } from "@/lib/api/http";
+import { jsonResponse } from "@/lib/api/http";
 import { startAthenaSession } from "@/lib/employees/athena/service";
-import { AthenaServiceError } from "@/lib/employees/athena/types";
+import {
+  getServerInstanceId,
+  logRouteIncoming,
+  logRouteReturned,
+  logSessionId,
+} from "@/lib/employees/athena/pipelineLogger";
+import { handleAthenaRouteError } from "@/lib/employees/athena/routeErrors";
+import { validateAthenaEnvironment } from "@/lib/employees/athena/validateEnv";
 
 export async function POST() {
+  logRouteIncoming("session", { instanceId: getServerInstanceId() });
+  validateAthenaEnvironment();
+
   try {
-    const session = startAthenaSession();
+    const session = await startAthenaSession();
+
+    logSessionId(session.sessionId, "session.response");
+    logRouteReturned("session", {
+      sessionId: session.sessionId,
+      questionId: session.question.id,
+      questionPreview: session.question.text.slice(0, 200),
+      questionNumber: session.questionNumber,
+      confidenceAverage: session.confidence.average,
+      status: session.status,
+    });
+
     return jsonResponse(session, 201);
   } catch (error) {
-    return handleAthenaError(error);
+    return handleAthenaRouteError("session", error);
   }
-}
-
-function handleAthenaError(error: unknown) {
-  if (error instanceof AthenaServiceError) {
-    return errorResponse(error.message, error.code, error.statusCode);
-  }
-
-  console.error("[athena/session]", error);
-  return errorResponse("Internal server error.", "INTERNAL_ERROR", 500);
 }

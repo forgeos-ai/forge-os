@@ -44,14 +44,22 @@ export interface GatewayResult<T> {
 }
 
 export interface AIProductBrief {
-  startupIdea: string;
-  problem: string;
-  customer: string;
-  currentSolution: string;
-  frustrations: string;
-  proposedSolution: string;
-  mvp: string;
-  successGoal: string;
+  executiveSummary: string;
+  startupThesis: string;
+  coreProblem: string;
+  targetCustomer: string;
+  buyer: string;
+  keyAssumptions: string;
+  biggestRisks: string;
+  validationPlan: string;
+  mvp30Day: string;
+  successMetrics: string;
+  recommendedNextAction: string;
+  founderDNASummary: string;
+  evidenceSummary: string;
+  blindSpots: string;
+  opportunityScore: string;
+  conversationQuality: string;
   metadata: {
     sessionId: string;
     generatedAt: Date;
@@ -59,7 +67,19 @@ export interface AIProductBrief {
     model: string;
     source: "ai-gateway";
     mode: "mock" | "live";
+    documentType: "founder-blueprint";
+    version: string;
   };
+}
+
+/** Founder Blueprint — Phase 2 premium document synthesized by Athena. */
+export type FounderBlueprint = AIProductBrief;
+
+export interface AIGeneratedQuestion {
+  question: string;
+  objective: string;
+  reason: string;
+  targetDimension: string;
 }
 
 export interface AIFollowUp {

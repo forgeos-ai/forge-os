@@ -1,15 +1,24 @@
 import "server-only";
 
-import { AIGatewayError } from "@/lib/ai/types";
-import { errorResponse, jsonResponse, parseJsonBody } from "@/lib/api/http";
+import { jsonResponse, parseJsonBody, errorResponse } from "@/lib/api/http";
 import { generateAthenaBrief } from "@/lib/employees/athena/service";
-import { AthenaServiceError } from "@/lib/employees/athena/types";
-import { MissingOpenAIApiKeyError } from "@/lib/openai";
+import {
+  getServerInstanceId,
+  logRouteIncoming,
+  logRouteReturned,
+  logSessionId,
+} from "@/lib/employees/athena/pipelineLogger";
+import { handleAthenaRouteError } from "@/lib/employees/athena/routeErrors";
 
 export async function POST(request: Request) {
-  try {
-    const body = await parseJsonBody<{ sessionId?: string }>(request);
+  const body = await parseJsonBody<{ sessionId?: string }>(request);
 
+  logRouteIncoming("brief", {
+    instanceId: getServerInstanceId(),
+    sessionId: body?.sessionId ?? null,
+  });
+
+  try {
     if (!body?.sessionId) {
       return errorResponse(
         "Request body must include sessionId.",
@@ -18,25 +27,16 @@ export async function POST(request: Request) {
     }
 
     const result = await generateAthenaBrief(body.sessionId);
+
+    logSessionId(result.sessionId, "brief.response");
+    logRouteReturned("brief", {
+      sessionId: result.sessionId,
+      provider: result.provider,
+      blueprintVersion: result.brief.metadata.version,
+    });
+
     return jsonResponse(result);
   } catch (error) {
-    return handleAthenaError(error);
+    return handleAthenaRouteError("brief", error);
   }
-}
-
-function handleAthenaError(error: unknown) {
-  if (error instanceof AthenaServiceError) {
-    return errorResponse(error.message, error.code, error.statusCode);
-  }
-
-  if (error instanceof MissingOpenAIApiKeyError) {
-    return errorResponse(error.message, "MISSING_OPENAI_API_KEY", 500);
-  }
-
-  if (error instanceof AIGatewayError) {
-    return errorResponse(error.message, "AI_GATEWAY_ERROR", 502);
-  }
-
-  console.error("[athena/brief]", error);
-  return errorResponse("Internal server error.", "INTERNAL_ERROR", 500);
 }
