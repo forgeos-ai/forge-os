@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function Home() {
   return (
     <main className="min-h-screen bg-black text-white flex items-center justify-center">
@@ -20,9 +22,12 @@ export default function Home() {
         </p>
 
         <div className="flex justify-center gap-5">
-          <button className="rounded-xl bg-white px-8 py-4 text-black font-semibold hover:bg-gray-200 transition">
+          <Link
+            href="/interview"
+            className="rounded-xl bg-white px-8 py-4 text-black font-semibold hover:bg-gray-200 transition"
+          >
             Start Building
-          </button>
+          </Link>
 
           <button className="rounded-xl border border-gray-600 px-8 py-4 hover:border-white transition">
             Learn More
