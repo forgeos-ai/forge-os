@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 
-import { FORGE_ALPHA_VERSION } from "@/lib/constants";
+import { FORGE_CLIPS_VERSION } from "@/lib/constants";
 
 import "./globals.css";
 
@@ -16,9 +16,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Forge OS",
+  title: "Forge Clips",
   description:
-    "An AI-first operating system for founders. Build products faster with specialized AI employees.",
+    "Turn one long video into multiple short-form clips with AI. Upload MP4 or paste a URL.",
 };
 
 export default function RootLayout({
@@ -41,7 +41,7 @@ export default function RootLayout({
         <div id="main-content" className="flex min-h-full flex-1 flex-col">
           {children}
         </div>
-        <span className="sr-only">{FORGE_ALPHA_VERSION}</span>
+        <span className="sr-only">{FORGE_CLIPS_VERSION}</span>
       </body>
     </html>
   );

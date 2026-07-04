@@ -1,1 +1,1 @@
-export const FORGE_ALPHA_VERSION = "Alpha v0.3.1";
+export const FORGE_CLIPS_VERSION = "Beta v1.0";

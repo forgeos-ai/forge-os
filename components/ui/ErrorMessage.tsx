@@ -4,7 +4,7 @@ type ErrorMessageProps = {
 };
 
 export function ErrorMessage({
-  title = "Unable to reach Athena.",
+  title = "Something went wrong",
   message = "Please retry in a few moments.",
 }: ErrorMessageProps) {
   return (
